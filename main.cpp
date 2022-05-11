@@ -40,15 +40,13 @@ int32_t PeekFromUtf8(std::fstream& in) {
 		return (BYTE)c;
 	if (size == 8)
 		return 0;
-	int prevSize = 7 - size;
-	int32_t ret = ((BYTE)c) & (0xFF >> prevSize);
+	int32_t ret = ((BYTE)c) & (0xFF >> (7 - size));
 	for (int i = 0; i < size - 1; i++) {
 		in.get(c);
 		if (c == EOF)
 			throw EndOfFileException();
-		ret <<= prevSize;
+		ret <<= 6;
 		ret |= ((BYTE)c) & 0x3F;
-		prevSize = 6;
 	}
 	return ret;
 }
