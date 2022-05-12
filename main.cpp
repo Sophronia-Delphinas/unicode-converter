@@ -17,20 +17,20 @@ namespace cbm::util {
         CODE_CONVERTER() = default;
         virtual ~CODE_CONVERTER() = default;
     public:
-        virtual bool CheckStreamHeader(std::istream& in) {
+        virtual int CheckStreamHeader(std::istream& in) {
             throw std::exception();
         }
-        virtual UNICHAR PeekFromStream(std::istream& in) {
+        virtual UNICHAR PeekFromStream(std::istream &in, bool endian) {
             throw std::exception();
         }
 
-        virtual UNICHAR PeekFromString(const void* source, size_t& cursor) = 0;
-        std::vector<UNICHAR> ConvertString(const void* str) {
+        virtual UNICHAR PeekFromString(const void *source, size_t &cursor, bool endian) = 0;
+        std::vector<UNICHAR> ConvertString(const void* str, bool endian) {
             std::vector<UNICHAR> vector;
 
             size_t cursor = 0;
             while (true) {
-                UNICHAR uc = PeekFromString(str, cursor);
+                UNICHAR uc = PeekFromString(str, cursor, endian);
                 if (!uc)
                     break;
                 vector.push_back(uc);
@@ -39,13 +39,13 @@ namespace cbm::util {
             return vector;
         }
 
-        virtual int ConvertUnicode(UNICHAR c, std::array<BYTE, 4>& u8Array) = 0;
-        virtual void WriteToStream(std::ostream& out, UNICHAR c) {
+        virtual int ConvertUnicode(UNICHAR c, std::array<BYTE, 4> &u8Array, bool endian) = 0;
+        virtual void WriteToStream(std::ostream &out, UNICHAR c, bool endian) {
             throw std::exception();
         }
-        void WriteUString(std::ostream& out, CUSTR uString) {
+        void WriteUString(std::ostream& out, CUSTR uString, bool endian) {
             for (size_t i = 0; uString[i]; i++)
-                WriteToStream(out, uString[i]);
+                WriteToStream(out, uString[i], endian);
         }
 
         static CODE_CONVERTER& BaseUTF8Converter();
@@ -61,7 +61,7 @@ namespace cbm::util {
         CONV_UTF8() = default;
         ~CONV_UTF8() override = default;
 
-        bool CheckStreamHeader(std::istream& in) override {
+        int CheckStreamHeader(std::istream& in) override {
             std::streampos pos = in.tellg();
 
             in.seekg(0, std::ios::beg);
@@ -79,7 +79,7 @@ namespace cbm::util {
 
             return ret;
         }
-        UNICHAR PeekFromStream(std::istream& in) override {
+        UNICHAR PeekFromStream(std::istream &in, bool endian) override {
             std::istream::int_type check = in.peek();
             if (check == EOF)
                 return 0;
@@ -100,7 +100,7 @@ namespace cbm::util {
             }
             return ret;
         }
-        UNICHAR PeekFromString(const void *source, size_t& cursor) override {
+        UNICHAR PeekFromString(const void *source, size_t &cursor, bool endian) override {
             const BYTE* str = static_cast<const BYTE *>(source);
             if (!str[cursor])
                 return 0;
@@ -121,7 +121,7 @@ namespace cbm::util {
             return ret;
         }
 
-        int ConvertUnicode(UNICHAR c, std::array<BYTE, 4>& u8Array) override {
+        int ConvertUnicode(UNICHAR c, std::array<BYTE, 4> &u8Array, bool endian) override {
             if (c <= 0x7F) {
                 u8Array[0] = (BYTE)c;
                 return 1;
@@ -142,9 +142,9 @@ namespace cbm::util {
             u8Array[0] = (BYTE)(mask | (BYTE)c);
             return size;
         }
-        void WriteToStream(std::ostream& out, UNICHAR c) override {
+        void WriteToStream(std::ostream &out, UNICHAR c, bool endian) override {
             std::array<BYTE, 4> buffer = {};
-            int size = ConvertUnicode(c, buffer);
+            int size = ConvertUnicode(c, buffer, endian);
             for (int i = 0; i < size; i++)
                 out << buffer[i];
         }
@@ -166,11 +166,11 @@ int main() {
 
 	if (converterU8.CheckStreamHeader(in)) {
 		while (!in.eof()) {
-            UNICHAR c = converterU8.PeekFromStream(in);
+            UNICHAR c = converterU8.PeekFromStream(in, true);
 			if (c == 0)
 				break;
 			std::cout << c << std::endl;
-            converterU8.WriteToStream(out, c);
+            converterU8.WriteToStream(out, c, true);
 		}
 	}
 
