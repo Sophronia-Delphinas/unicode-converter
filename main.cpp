@@ -41,6 +41,7 @@ namespace cbm::util {
          * @return 1 if big-endian; -1 if little-endian; 0 if format incorrect or unknown
          */
         virtual ENDIAN CheckBOM(std::istream& in) = 0;
+        virtual void WriteBOM(std::ostream &out, ENDIAN endian) = 0;
         virtual bool EndianLegal(ENDIAN endian) = 0;
 
         virtual UNICHAR PeekFromStream(std::istream &in, ENDIAN endian) = 0;
@@ -95,6 +96,9 @@ namespace cbm::util {
         ENDIAN CheckBOM(std::istream& in) override {
             return converter->CheckBOM(in);
         }
+        void WriteBOM(std::ostream &out, ENDIAN endian) override {
+            converter->WriteBOM(out, endian);
+        }
         bool EndianLegal(ENDIAN endian) override {
             return converter->EndianLegal(endian);
         }
@@ -142,6 +146,9 @@ namespace cbm::util {
                 in.seekg(0, std::ios::beg);
                 return UNKNOWN;
             }
+        }
+        void WriteBOM(std::ostream &out, ENDIAN endian) override {
+            out << (BYTE)0xEF << (BYTE)0xBB << (BYTE)0xBF;
         }
         bool EndianLegal(ENDIAN endian) override {
             return true;
@@ -219,20 +226,13 @@ namespace cbm::util {
     };
     class CONV_UTF16 : public I_CODE_CONVERTER {
         static bool IsBasic(WORD w1, WORD w2) {
-            return (w1 >> 10) == 0x36 && (w2 >> 10) == 0x37;
-        }
-        static void SwapByEndian(WORD& w, ENDIAN endian) {
-            if (endian == LITTLE_ENDIAN) {
-                BYTE h = w >> 8;
-                BYTE l = w & 0xFF;
-                w = (l << 8) | h;
-            }
+            return (w1 >> 10) != 0x36 || (w2 >> 10) != 0x37;
         }
         static WORD BuildWord(BYTE b1, BYTE b2, bool endian) {
             if (endian)
-                return (b2 << 8) | b1;
-            else
                 return (b1 << 8) | b2;
+            else
+                return (b2 << 8) | b1;
         }
         static void SplitWord(WORD w, std::array<BYTE, 2>& byteArray, ENDIAN endian) {
             BYTE h = w >> 8;
@@ -275,14 +275,15 @@ namespace cbm::util {
             std::istream::int_type check = in.peek();
             if (check == EOF)
                 return 0;
-            WORD w1, w2;
-            in.get((char*)&w1, 2);
-            in.get((char*)&w2, 2);
-            SwapByEndian(w1, endian);
-            SwapByEndian(w2, endian);
+            BYTE b1 = in.get();
+            BYTE b2 = in.get();
+            BYTE b3 = in.get();
+            BYTE b4 = in.get();
+            WORD w1 = BuildWord(b1, b2, endian);
+            WORD w2 = BuildWord(b3, b4, endian);
             bool basic = IsBasic(w1, w2);
             if (basic) {
-                in.seekg(-2, std::ios::cur);
+                in.seekg(-1, std::ios::cur);
                 return w1;
             }
             else
@@ -336,6 +337,12 @@ namespace cbm::util {
             u8Array[0] = (BYTE)(mask | (BYTE)c);
             return size;
         }
+        void WriteBOM(std::ostream &out, ENDIAN endian) override {
+            if (endian == BIG_ENDIAN)
+                out << (BYTE)0xFE << (BYTE)0xFF;
+            else
+                out << (BYTE)0xFF << (BYTE)0xFE;
+        }
         void WriteToStream(std::ostream &out, UNICHAR c, ENDIAN endian) override {
             std::array<BYTE, 4> buffer = {};
             int size = ConvertUnicode(c, buffer, endian);
@@ -358,10 +365,10 @@ using namespace cbm::util;
 
 int main() {
 	std::fstream in("../source-u16.txt");
-	std::fstream out("../target.txt", std::ios::out);
-	out << (BYTE)0xEF << (BYTE)0xBB << (BYTE)0xBF;
+	std::fstream out("../target-u16.txt", std::ios::out);
 
     auto converter = CODE_CONVERTER::BaseUTF16();
+    converter.WriteBOM(out, GetEndian());
 
     ENDIAN endian = converter.CheckBOM(in);
     if (!converter.EndianLegal(endian))
