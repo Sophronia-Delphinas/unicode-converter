@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <Windows.h>
 #include <array>
 #include <vector>
@@ -46,13 +47,12 @@ namespace cbm::util {
 
         virtual UNICHAR PeekFromStream(std::istream &in, ENDIAN endian) = 0;
 
-        virtual UNICHAR PeekFromString(const void *source, size_t &cursor, ENDIAN endian) = 0;
-        std::vector<UNICHAR> ConvertString(const void* str, ENDIAN endian) {
+        std::vector<UNICHAR> ConvertString(const char* str, ENDIAN endian) {
             std::vector<UNICHAR> vector;
+            std::stringstream source(str);
 
-            size_t cursor = 0;
             while (true) {
-                UNICHAR uc = PeekFromString(str, cursor, endian);
+                UNICHAR uc = PeekFromStream(source, endian);
                 if (!uc)
                     break;
                 vector.push_back(uc);
@@ -106,9 +106,6 @@ namespace cbm::util {
         UNICHAR PeekFromStream(std::istream &in, ENDIAN endian) override {
             return converter->PeekFromStream(in, endian);
         }
-        UNICHAR PeekFromString(const void *source, size_t &cursor, ENDIAN endian) override {
-            return converter->PeekFromString(source, cursor, endian);
-        }
 
         int ConvertUnicode(UNICHAR c, std::array<BYTE, 4> &u8Array, ENDIAN endian) override {
             return converter->ConvertUnicode(c, u8Array, endian);
@@ -117,8 +114,8 @@ namespace cbm::util {
             converter->WriteToStream(out, c, endian);
         }
 
-        static CODE_CONVERTER BaseUTF8();
-        static CODE_CONVERTER BaseUTF16();
+        [[maybe_unused]] static CODE_CONVERTER BaseUTF8();
+        [[maybe_unused]] static CODE_CONVERTER BaseUTF16();
     };
 
     class CONV_UTF8 : public I_CODE_CONVERTER {
@@ -158,8 +155,7 @@ namespace cbm::util {
             std::istream::int_type check = in.peek();
             if (check == EOF)
                 return 0;
-            char c;
-            in.get(c);
+            char c = (char)in.get();
             int size = SizeOfUnicode(c);
             if (!size)
                 return (BYTE)c;
@@ -172,26 +168,6 @@ namespace cbm::util {
                     return 0;
                 ret <<= 6;
                 ret |= ((BYTE)c) & 0x3F;
-            }
-            return ret;
-        }
-        UNICHAR PeekFromString(const void *source, size_t &cursor, ENDIAN endian) override {
-            const BYTE* str = static_cast<const BYTE *>(source);
-            if (!str[cursor])
-                return 0;
-            BYTE c = str[cursor++];
-            int size = SizeOfUnicode(c);
-            if (!size)
-                return c;
-            if (size == 8)
-                return 0;
-            int32_t ret = c & (0xFF >> (7 - size));
-            for (int i = 0; i < size - 1; i++) {
-                c = str[cursor++];
-                if (!c)
-                    return 0;
-                ret <<= 6;
-                ret |= c & 0x3F;
             }
             return ret;
         }
@@ -225,6 +201,16 @@ namespace cbm::util {
         }
     };
     class CONV_UTF16 : public I_CODE_CONVERTER {
+        static bool GetBytes(std::istream &in, std::array<BYTE, 4> &container) {
+            for (size_t i = 0; i < 4; i++) {
+                char c;
+                in.get(c);
+                if (c == EOF)
+                    return false;
+                container[i] = c;
+            }
+            return true;
+        }
         static bool IsBasic(WORD w1, WORD w2) {
             return (w1 >> 10) != 0x36 || (w2 >> 10) != 0x37;
         }
@@ -246,7 +232,7 @@ namespace cbm::util {
                 byteArray[1] = h;
             }
         }
-        static UNICHAR BuildU32(WORD w1, WORD w2) {
+        static UNICHAR BuildUniChar(WORD w1, WORD w2) {
             return ((w1 & (0xFFFF >> 10)) << 10) | (w2 & (0xFFFF >> 10)) + 0x10000;
         }
     public:
@@ -278,36 +264,18 @@ namespace cbm::util {
             std::istream::int_type check = in.peek();
             if (check == EOF)
                 return 0;
-            char buffer[2]{};
-            in.read(buffer, 2);
+            std::array<BYTE, 4> buffer{};
+            if (!GetBytes(in, buffer))
+                return 0;
             WORD w1 = BuildWord(buffer[0], buffer[1], endian);
-            in.read(buffer, 2);
-            WORD w2 = BuildWord(buffer[0], buffer[1], endian);
+            WORD w2 = BuildWord(buffer[2], buffer[3], endian);
             bool basic = IsBasic(w1, w2);
             if (basic) {
                 in.seekg(-2, std::ios::cur);
                 return w1;
             }
             else
-                return BuildU32(w1, w2);
-        }
-        UNICHAR PeekFromString(const void *source, size_t &cursor, ENDIAN endian) override {
-            const BYTE* str = static_cast<const BYTE *>(source);
-            if (!str[cursor])
-                return 0;
-            BYTE c1 = str[cursor++];
-            BYTE c2 = str[cursor++];
-            BYTE c3 = str[cursor++];
-            BYTE c4 = str[cursor++];
-            WORD w1 = BuildWord(c1, c2, endian);
-            WORD w2 = BuildWord(c3, c4, endian);
-            bool basic = IsBasic(w1, w2);
-            if (basic) {
-                cursor -= 2;
-                return w1;
-            }
-            else
-                return BuildU32(w1, w2);
+                return BuildUniChar(w1, w2);
         }
 
         int ConvertUnicode(UNICHAR c, std::array<BYTE, 4> &u8Array, ENDIAN endian) override {
@@ -352,10 +320,11 @@ namespace cbm::util {
     CODE_CONVERTER::CODE_CONVERTER() {
         converter = new CONV_UTF8;
     }
-    CODE_CONVERTER CODE_CONVERTER::BaseUTF8() {
+
+    [[maybe_unused]] CODE_CONVERTER CODE_CONVERTER::BaseUTF8() {
         return CODE_CONVERTER(new CONV_UTF8);
     }
-    CODE_CONVERTER CODE_CONVERTER::BaseUTF16() {
+    [[maybe_unused]] CODE_CONVERTER CODE_CONVERTER::BaseUTF16() {
         return CODE_CONVERTER(new CONV_UTF16);
     }
 }
