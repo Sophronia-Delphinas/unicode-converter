@@ -22,12 +22,12 @@ namespace cbm::util {
     /**
      * @return 1 if big-endian; -1 if little-endian
      */
-    ENDIAN GetEndian() {
+    constexpr ENDIAN GetEndian() {
         union uu {
-            int i;
+            int i = 1;
             char c;
-        } u{};
-        u.i = 1;
+        };
+        uu u;
         return u.c ? LITTLE_ENDIAN : BIG_ENDIAN;
     }
 
@@ -125,7 +125,7 @@ namespace cbm::util {
             return size;
         }
     public:
-        CONV_UTF8() = default;
+        constexpr CONV_UTF8() = default;
         ~CONV_UTF8() override = default;
 
         ENDIAN CheckBOM(std::istream& in) override {\
@@ -236,7 +236,7 @@ namespace cbm::util {
             return ((w1 & (0xFFFF >> 10)) << 10) | (w2 & (0xFFFF >> 10)) + 0x10000;
         }
     public:
-        CONV_UTF16() = default;
+        constexpr CONV_UTF16() = default;
         ~CONV_UTF16() override = default;
 
         ENDIAN CheckBOM(std::istream& in) override {
