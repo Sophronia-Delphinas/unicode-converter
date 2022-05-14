@@ -13,7 +13,7 @@ namespace cbm::core {
 namespace cbm::util {
     using namespace cbm::core;
 
-    enum ENDIAN {
+    enum class ENDIAN {
         BIG_ENDIAN = 1,
         LITTLE_ENDIAN = -1,
         UNKNOWN = 0
@@ -28,7 +28,7 @@ namespace cbm::util {
             char c;
         };
         uu u;
-        return u.c ? LITTLE_ENDIAN : BIG_ENDIAN;
+        return u.c ? ENDIAN::LITTLE_ENDIAN : ENDIAN::BIG_ENDIAN;
     }
 
     class CODE_CONVERTER;
@@ -62,7 +62,11 @@ namespace cbm::util {
         }
 
         virtual int ConvertUnicode(UNICHAR c, std::array<BYTE, 4> &u8Array, ENDIAN endian) = 0;
-        virtual void WriteToStream(std::ostream &out, UNICHAR c, ENDIAN endian) = 0;
+        void WriteToStream(std::ostream &out, UNICHAR c, ENDIAN endian) {
+            std::array<BYTE, 4> buffer = {};
+            int size = ConvertUnicode(c, buffer, endian);
+            out.write(reinterpret_cast<const char *>(&buffer[0]), size);
+        }
         void WriteUString(std::ostream& out, CUSTR uString, ENDIAN endian) {
             for (size_t i = 0; uString[i]; i++)
                 WriteToStream(out, uString[i], endian);
@@ -110,9 +114,6 @@ namespace cbm::util {
         int ConvertUnicode(UNICHAR c, std::array<BYTE, 4> &u8Array, ENDIAN endian) override {
             return converter->ConvertUnicode(c, u8Array, endian);
         }
-        void WriteToStream(std::ostream &out, UNICHAR c, ENDIAN endian) override {
-            converter->WriteToStream(out, c, endian);
-        }
 
         [[maybe_unused]] static CODE_CONVERTER BaseUTF8();
         [[maybe_unused]] static CODE_CONVERTER BaseUTF16();
@@ -141,7 +142,7 @@ namespace cbm::util {
                 return GetEndian();
             else {
                 in.seekg(0, std::ios::beg);
-                return UNKNOWN;
+                return ENDIAN::UNKNOWN;
             }
         }
         void WriteBOM(std::ostream &out, ENDIAN endian) override {
@@ -193,12 +194,6 @@ namespace cbm::util {
             u8Array[0] = (BYTE)(mask | (BYTE)c);
             return size;
         }
-        void WriteToStream(std::ostream &out, UNICHAR c, ENDIAN endian) override {
-            std::array<BYTE, 4> buffer = {};
-            int size = ConvertUnicode(c, buffer, endian);
-            for (int i = 0; i < size; i++)
-                out << buffer[i];
-        }
     };
     class CONV_UTF16 : public I_CODE_CONVERTER {
         static bool GetBytes(std::istream &in, std::array<BYTE, 4> &container) {
@@ -215,7 +210,7 @@ namespace cbm::util {
             return (w1 >> 10) != 0x36 || (w2 >> 10) != 0x37;
         }
         static WORD BuildWord(BYTE b1, BYTE b2, ENDIAN endian) {
-            if (endian == BIG_ENDIAN)
+            if (endian == ENDIAN::BIG_ENDIAN)
                 return (b1 << 8) | b2;
             else
                 return (b2 << 8) | b1;
@@ -223,7 +218,7 @@ namespace cbm::util {
         static void SplitWord(WORD w, std::array<BYTE, 2>& byteArray, ENDIAN endian) {
             BYTE h = w >> 8;
             BYTE l = w & 0xFF;
-            if (endian == BIG_ENDIAN) {
+            if (endian == ENDIAN::BIG_ENDIAN) {
                 byteArray[0] = h;
                 byteArray[1] = l;
             }
@@ -250,14 +245,14 @@ namespace cbm::util {
             }
 
             if (bom == 0xFFFE)
-                return LITTLE_ENDIAN;
+                return ENDIAN::LITTLE_ENDIAN;
             else if (bom == 0xFEFF)
-                return BIG_ENDIAN;
+                return ENDIAN::BIG_ENDIAN;
             else
-                return UNKNOWN;
+                return ENDIAN::UNKNOWN;
         }
         bool EndianLegal(ENDIAN endian) override {
-            return endian != UNKNOWN;
+            return endian != ENDIAN::UNKNOWN;
         }
 
         UNICHAR PeekFromStream(std::istream &in, ENDIAN endian) override {
@@ -283,7 +278,7 @@ namespace cbm::util {
             if (c > 0xFFFF) {
                 c -= 0x10000;
                 WORD h, l;
-                if (endian == LITTLE_ENDIAN) {
+                if (endian == ENDIAN::LITTLE_ENDIAN) {
                     h = (c >> 10) | 0xD800;
                     l = (c & 0x03FF) | 0xDC00;
                 }
@@ -304,16 +299,10 @@ namespace cbm::util {
             }
         }
         void WriteBOM(std::ostream &out, ENDIAN endian) override {
-            if (endian == BIG_ENDIAN)
+            if (endian == ENDIAN::BIG_ENDIAN)
                 out << (BYTE)0xFE << (BYTE)0xFF;
             else
                 out << (BYTE)0xFF << (BYTE)0xFE;
-        }
-        void WriteToStream(std::ostream &out, UNICHAR c, ENDIAN endian) override {
-            std::array<BYTE, 4> buffer = {};
-            int size = ConvertUnicode(c, buffer, endian);
-            for (int i = 0; i < size; i++)
-                out << buffer[i];
         }
     };
 
@@ -331,10 +320,10 @@ namespace cbm::util {
 using namespace cbm::util;
 
 int main() {
-	std::fstream in("../source-u16.txt", std::ios::in | std::ios::binary);
-	std::fstream out("../target-u16.txt", std::ios::out | std::ios::binary);
+	std::fstream in("../source.txt", std::ios::in | std::ios::binary);
+	std::fstream out("../target.txt", std::ios::out | std::ios::binary);
 
-    auto converter = CODE_CONVERTER::BaseUTF16();
+    auto converter = CODE_CONVERTER::BaseUTF8();
     ENDIAN systemEndian = GetEndian();
     converter.WriteBOM(out, systemEndian);
 
@@ -348,6 +337,11 @@ int main() {
             break;
         std::cout << c << std::endl;
         converter.WriteToStream(out, c, systemEndian);
+    }
+
+    std::stringstream str("11223344");
+    while (!str.eof()) {
+        std::cout << str.get() << std::endl;
     }
 
 	return 0;
